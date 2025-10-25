@@ -1,0 +1,18 @@
+body {
+  font-family: sans-serif;
+  width: 200px;
+}
+
+h1 {
+  font-size: 16px;
+  text-align: center;
+}
+
+button {
+  width: 100%;
+  padding: 10px;
+  border: none;
+  background-color: #007bff;
+  color: white;
+  cursor: pointer;
+}

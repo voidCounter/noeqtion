@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Notion Math Converter",
+  "version": "1.0",
+  "description": "Converts LaTeX-style math equations to Notion's native format.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["https://www.notion.so/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.notion.so/*"],
+      "js": ["content.js"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
