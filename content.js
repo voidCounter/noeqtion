@@ -3,15 +3,15 @@ console.log("Notion Math Converter content script loaded.");
 const EQUATION_REGEX = /(\$\$.*?\$\$|\$.*?\$)/;
 const TIMING = {
   // Wait after focusing an editable block so Notion registers the focus (milliseconds)
-  FOCUS: 100,
+  FOCUS: 50,
   // Short pause for quick UI updates between small operations (select/delete/insertText)
-  QUICK: 50,
-  // Wait for dialogs/inputs to appear (e.g., math dialog) before typing into them
-  DIALOG: 200,
-  // Extra time for the math block to fully initialize after creating it with "/math" + Enter
-  MATH_BLOCK: 300,
+  QUICK: 20,
+  // Wait for dialogs/inputs to appear (Display Block only)
+  DIALOG: 100,
+  // Extra time for the math block to fully initialize (Display Block only)
+  MATH_BLOCK: 150,
   // Wait after a conversion for Notion to update the DOM before rescanning/continuing
-  POST_CONVERT: 500,
+  POST_CONVERT: 200,
 };
 
 const api = typeof browser !== "undefined" ? browser : chrome;
@@ -38,11 +38,14 @@ document.addEventListener("keydown", (event) => {
 // Main Conversion Flow
 
 async function convertMathEquations() {
+  // Hide the math dialog box to reduce visual distraction during block conversion.
+  injectCSS(
+    'div[role="dialog"] { opacity: 0 !important; transform: scale(0.001) !important; }'
+  );
+
   const initialCount = findEquations().length;
   let processedCount = 0;
 
-  // Process equations one at a time and re-scan after each
-  // because DOM changes after each conversion
   while (processedCount < initialCount) {
     const equations = findEquations();
 
@@ -51,8 +54,6 @@ async function convertMathEquations() {
     }
 
     const node = equations[0];
-
-    // Find the FIRST equation in this text node
     const match = node.nodeValue.match(EQUATION_REGEX);
 
     if (match && match[0]) {
@@ -63,6 +64,12 @@ async function convertMathEquations() {
       console.warn("No equation match found in node, skipping");
       break;
     }
+  }
+
+  // CLEANUP CSS: Remove the injected style after all conversions are complete.
+  const styleTag = document.getElementById("notion-math-converter-hide-dialog");
+  if (styleTag) {
+    styleTag.remove();
   }
 }
 
@@ -76,7 +83,6 @@ async function convertSingleEquation(node, equationText) {
       return;
     }
 
-    // Focus the Notion editable block
     const editableParent = findEditableParent(node);
     if (!editableParent) {
       console.warn("Could not find editable parent");
@@ -86,18 +92,15 @@ async function convertSingleEquation(node, equationText) {
     editableParent.click();
     await delay(TIMING.FOCUS);
 
-    // Select the equation text
     selectText(node, startIndex, equationText.length);
     await delay(TIMING.QUICK);
 
-    // Verify selection was successful
     const selection = window.getSelection();
     if (!selection.rangeCount || selection.toString() !== equationText) {
       console.warn("Selection failed or doesn't match equation text");
       return;
     }
 
-    // Extract LaTeX and determine equation type
     const isDisplayEquation =
       equationText.startsWith("$$") && equationText.endsWith("$$");
     const latexContent = isDisplayEquation
@@ -117,14 +120,13 @@ async function convertSingleEquation(node, equationText) {
 }
 
 async function convertDisplayEquation(editableParent, latexContent) {
-  // Delete entire line and use /math command
   const selection = window.getSelection();
   const blockRange = document.createRange();
   blockRange.selectNodeContents(editableParent);
   selection.removeAllRanges();
   selection.addRange(blockRange);
 
-  document.execCommand("delete");
+  selection.deleteFromDocument();
   await delay(TIMING.FOCUS);
 
   document.execCommand("insertText", false, "/math");
@@ -133,9 +135,8 @@ async function convertDisplayEquation(editableParent, latexContent) {
   dispatchKeyEvent("Enter", { keyCode: 13 });
   await delay(TIMING.MATH_BLOCK);
 
-  // Insert LaTeX into math block dialog
   if (isEditableElement(document.activeElement)) {
-    document.execCommand("insertText", false, latexContent);
+    insertTextIntoActiveElement(document.activeElement, latexContent);
   } else {
     console.warn("Could not find math block input");
   }
@@ -145,39 +146,37 @@ async function convertDisplayEquation(editableParent, latexContent) {
 }
 
 async function convertInlineEquation(latexContent) {
-  // Verify selection exists before deleting
   const selection = window.getSelection();
   if (!selection.rangeCount || selection.isCollapsed) {
     console.warn("No text selected for inline equation");
     return;
   }
 
-  // Delete selected text
-  document.execCommand("delete");
+  selection.deleteFromDocument();
   await delay(TIMING.QUICK);
 
-  // Trigger inline equation with Ctrl+Shift+E
-  dispatchKeyEvent("e", {
-    keyCode: 69,
-    ctrlKey: true,
-    shiftKey: true,
-  });
-  await delay(TIMING.DIALOG);
+  const fullEquationText = `$$${latexContent}$$`;
+  document.execCommand("insertText", false, fullEquationText);
 
-  // Insert LaTeX into inline equation dialog
-  const activeElement = document.activeElement;
-  if (isEditableElement(activeElement)) {
-    // Clear any existing content first
-    if (activeElement.value !== undefined) {
-      activeElement.value = "";
-    }
-    document.execCommand("insertText", false, latexContent);
+  await delay(TIMING.QUICK);
+}
+
+function insertTextIntoActiveElement(element, text) {
+  if (element.value !== undefined) {
+    element.value = text;
+    element.dispatchEvent(new Event("input", { bubbles: true }));
   } else {
-    console.warn("No suitable input element focused for inline equation");
+    document.execCommand("insertText", false, text);
   }
+}
 
-  await delay(TIMING.DIALOG);
-  clickDoneButton() || dispatchKeyEvent("Enter", { keyCode: 13 });
+// injects a style rule into the page's <head>.
+function injectCSS(css) {
+  const style = document.createElement("style");
+  style.type = "text/css";
+  style.id = "notion-math-converter-hide-dialog";
+  style.appendChild(document.createTextNode(css));
+  document.head.appendChild(style);
 }
 
 // Helper Functions
@@ -197,7 +196,6 @@ function findEquations() {
       const globalRegex = /(\$\$.*?\$\$|\$.*?\$)/g;
       const matches = node.nodeValue.match(globalRegex);
       if (matches) {
-        // Add the node once for each equation found
         for (let i = 0; i < matches.length; i++) {
           textNodes.push(node);
         }
@@ -251,7 +249,10 @@ function isEditableElement(element) {
 }
 
 function dispatchKeyEvent(key, options = {}) {
-  document.activeElement.dispatchEvent(
+  const activeElement = document.activeElement;
+  if (!activeElement) return;
+
+  activeElement.dispatchEvent(
     new KeyboardEvent("keydown", {
       key: key,
       code: options.code || `Key${key.toUpperCase()}`,
