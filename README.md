@@ -2,18 +2,14 @@ A browser extension that converts LaTeX-style equations to Notion's native math 
 
 Notion still hasn't implemented automatic equation rendering for pasted text. If you've ever copied notes with mathematical equations into Notion, you know the pain. Those beautiful `$E=mc^2$` expressions just sit there as plain text. This extension fixes that just with a keyboard shortcut.
 
-## Demo
-
-<video src="https://github.com/user-attachments/assets/your-video-id/Demo.mp4" controls width="100%">
-  Your browser does not support the video tag.
-</video>
+https://github.com/user-attachments/assets/210fc090-7e01-4e19-a6dc-da776534909f
 
 _See the extension in action converting LaTeX equations to Notion's native math blocks_
 
 ## Features
 
-- **Automatic Conversion**: Detects both inline (`$...$`) and display (`$$...$$`) equations
-- **Keyboard Shortcut**: Convert all equations on the page with `Ctrl+Alt+M` (or use the extension popup)
+- **Automatic Conversion**: Detects both inline (`$...$`) and block (`$$...$$`) equations.
+- **Keyboard Shortcut**: Convert all equations on the page with `Ctrl+Alt+M` (or use the extension popup).
 
 That's it.
 
@@ -31,8 +27,6 @@ That's it.
 - **Other Chromium-based browsers**: Probably work, but not tested
 
 ## Installation
-
-### From Source
 
 1. Clone or download this repository
 2. For Firefox:
@@ -52,6 +46,12 @@ The extension uses Notion's existing shortcuts and features to create math block
 To reduce visual distraction during conversion, the extension temporarily hides math dialogs using injected CSS. It processes equations sequentially, rescanning the DOM after each conversion to handle Notion's dynamic content updates.
 
 The extension doesn't inject custom UI or modify Notion's core behavior. It automates what you'd do manually, just much faster.
+
+## Limitations
+
+This extension works great for standard use cases. But there are some edge cases where it may not work as expected.
+
+If you encounter issues with these or other scenarios, please [open an issue](https://github.com/voidCounter/noeqtion/issues) with details about the specific context where the conversion failed.
 
 ## License
 
