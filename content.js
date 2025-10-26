@@ -1,6 +1,6 @@
 console.log("Notion Math Converter content script loaded.");
 
-const EQUATION_REGEX = /(\$\$.*?\$\$|\$.*?\$)/;
+const EQUATION_REGEX = /(\$\$[\s\S]*?\$\$|\$[^\$\n]*?\$)/;
 const TIMING = {
   // Wait after focusing an editable block so Notion registers the focus (milliseconds)
   FOCUS: 50,
@@ -9,9 +9,9 @@ const TIMING = {
   // Wait for dialogs/inputs to appear (Display Block only)
   DIALOG: 100,
   // Extra time for the math block to fully initialize (Display Block only)
-  MATH_BLOCK: 150,
+  MATH_BLOCK: 100,
   // Wait after a conversion for Notion to update the DOM before rescanning/continuing
-  POST_CONVERT: 200,
+  POST_CONVERT: 300,
 };
 
 const api = typeof browser !== "undefined" ? browser : chrome;
@@ -38,15 +38,13 @@ document.addEventListener("keydown", (event) => {
 // Main Conversion Flow
 
 async function convertMathEquations() {
-  // Hide the math dialog box to reduce visual distraction during block conversion.
+  // Hide the math dialog box and text action menu to reduce visual distraction during conversion.
   injectCSS(
-    'div[role="dialog"] { opacity: 0 !important; transform: scale(0.001) !important; }'
+    'div[role="dialog"] { opacity: 0 !important; transform: scale(0.001) !important; } ' +
+      ".notion-text-action-menu { opacity: 0 !important; transform: scale(0.001) !important; pointer-events: none !important; }"
   );
 
-  const initialCount = findEquations().length;
-  let processedCount = 0;
-
-  while (processedCount < initialCount) {
+  while (true) {
     const equations = findEquations();
 
     if (equations.length === 0) {
@@ -59,14 +57,13 @@ async function convertMathEquations() {
     if (match && match[0]) {
       const equationText = match[0];
       await convertSingleEquation(node, equationText);
-      processedCount++;
     } else {
       console.warn("No equation match found in node, skipping");
       break;
     }
   }
 
-  // CLEANUP CSS: Remove the injected style after all conversions are complete.
+  // Remove the injected style
   const styleTag = document.getElementById("notion-math-converter-hide-dialog");
   if (styleTag) {
     styleTag.remove();
@@ -104,27 +101,21 @@ async function convertSingleEquation(node, equationText) {
     const isDisplayEquation =
       equationText.startsWith("$$") && equationText.endsWith("$$");
     const latexContent = isDisplayEquation
-      ? equationText.slice(2, -2)
+      ? equationText.slice(2, -2).trim()
       : equationText.slice(1, -1);
 
     if (isDisplayEquation) {
-      await convertDisplayEquation(editableParent, latexContent);
+      await convertDisplayEquation(latexContent);
     } else {
       await convertInlineEquation(latexContent);
     }
-
-    await delay(TIMING.POST_CONVERT);
   } catch (err) {
     console.error("Equation conversion failed:", err);
   }
 }
 
-async function convertDisplayEquation(editableParent, latexContent) {
+async function convertDisplayEquation(latexContent) {
   const selection = window.getSelection();
-  const blockRange = document.createRange();
-  blockRange.selectNodeContents(editableParent);
-  selection.removeAllRanges();
-  selection.addRange(blockRange);
 
   selection.deleteFromDocument();
   await delay(TIMING.FOCUS);
@@ -142,7 +133,21 @@ async function convertDisplayEquation(editableParent, latexContent) {
   }
 
   await delay(TIMING.DIALOG);
-  clickDoneButton();
+
+  // Check if there's a KaTeX error in the dialog
+  const hasError = document.querySelector('div[role="alert"]') !== null;
+
+  if (hasError) {
+    console.warn("KaTeX error detected, closing dialog");
+    dispatchKeyEvent("Escape", { keyCode: 27 });
+  } else {
+    const doneClicked = clickDoneButton();
+    if (!doneClicked) {
+      dispatchKeyEvent("Escape", { keyCode: 27 });
+    }
+  }
+
+  await delay(TIMING.POST_CONVERT); // Wait for Notion to process the display equation
 }
 
 async function convertInlineEquation(latexContent) {
@@ -152,13 +157,11 @@ async function convertInlineEquation(latexContent) {
     return;
   }
 
-  selection.deleteFromDocument();
-  await delay(TIMING.QUICK);
-
+  // Don't delete first - directly replace the selection with the new text
   const fullEquationText = `$$${latexContent}$$`;
   document.execCommand("insertText", false, fullEquationText);
 
-  await delay(TIMING.QUICK);
+  await delay(TIMING.POST_CONVERT); // Wait for Notion to process the inline equation
 }
 
 function insertTextIntoActiveElement(element, text) {
@@ -193,13 +196,7 @@ function findEquations() {
   let node;
   while ((node = walker.nextNode())) {
     if (node.nodeValue && EQUATION_REGEX.test(node.nodeValue)) {
-      const globalRegex = /(\$\$.*?\$\$|\$.*?\$)/g;
-      const matches = node.nodeValue.match(globalRegex);
-      if (matches) {
-        for (let i = 0; i < matches.length; i++) {
-          textNodes.push(node);
-        }
-      }
+      textNodes.push(node);
     }
   }
 

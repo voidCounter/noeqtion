@@ -2,6 +2,14 @@ A browser extension that converts LaTeX-style equations to Notion's native math 
 
 Notion still hasn't implemented automatic equation rendering for pasted text. If you've ever copied notes with mathematical equations into Notion, you know the pain. Those beautiful `$E=mc^2$` expressions just sit there as plain text. This extension fixes that just with a keyboard shortcut.
 
+## Demo
+
+<video src="https://github.com/user-attachments/assets/your-video-id/Demo.mp4" controls width="100%">
+  Your browser does not support the video tag.
+</video>
+
+_See the extension in action converting LaTeX equations to Notion's native math blocks_
+
 ## Features
 
 - **Automatic Conversion**: Detects both inline (`$...$`) and display (`$$...$$`) equations
