@@ -33,13 +33,14 @@ That's it.
 - **Other Chromium-based browsers**: Probably work, but not tested
 
 ## Installation
+### For Firefox:
 
-1. Clone or download this repository
-2. For Firefox:
-   - Open `about:debugging`
-   - Click "This Firefox" → "Load Temporary Add-on"
-   - Select the `manifest.json` file
-3. For Chrome:
+<a style="display: block;" href="https://addons.mozilla.org/en-US/firefox/addon/notion-math-converter" target="_blank">
+  <img src="https://blog.mozilla.org/addons/files/2020/04/get-the-addon-fx-apr-2020.svg" 
+       alt="Get the Add-on" width="150"/>
+</a>
+
+### For Chrome:
    - Open `chrome://extensions/`
    - Enable "Developer mode"
    - Click "Load unpacked"
