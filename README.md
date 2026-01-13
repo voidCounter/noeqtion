@@ -1,5 +1,10 @@
-A browser extension that converts LaTeX-style equations to Notion's native math blocks.
+# Noeqtion — LaTeX to Notion Math Converter
+<a style="display: block;" href="https://addons.mozilla.org/en-US/firefox/addon/notion-math-converter" target="_blank">
+  <img src="https://blog.mozilla.org/addons/files/2020/04/get-the-addon-fx-apr-2020.svg" 
+       alt="Get the Add-on" width="150"/>
+</a>
 
+A browser extension that converts LaTeX-style equations to Notion's native math blocks.
 Notion still hasn't implemented automatic equation rendering for pasted text. If you've ever copied notes with mathematical equations into Notion, you know the pain. Those beautiful `$E=mc^2$` expressions just sit there as plain text. This extension fixes that just with a keyboard shortcut.
 
 https://github.com/user-attachments/assets/f872b9ef-1ce1-4ce5-bc26-92bc96a0a116
