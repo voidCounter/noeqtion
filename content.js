@@ -12,6 +12,8 @@ const TIMING = {
   MATH_BLOCK: 100,
   // Wait after a conversion for Notion to update the DOM before rescanning/continuing
   POST_CONVERT: 300,
+  // Wait after clicking a toggle so Notion lazy-loads the inner content
+  TOGGLE_EXPAND: 300,
 };
 
 const api = typeof browser !== "undefined" ? browser : chrome;
@@ -44,6 +46,10 @@ async function convertMathEquations() {
       ".notion-text-action-menu { opacity: 0 !important; transform: scale(0.001) !important; pointer-events: none !important; }"
   );
 
+  // Expand all collapsed toggle blocks so that equations inside them are reachable.
+  // Notion lazy-renders toggle content, so collapsed toggles have no DOM content to scan.
+  const expandedToggles = await expandAllToggles();
+
   while (true) {
     const equations = findEquations();
 
@@ -62,6 +68,9 @@ async function convertMathEquations() {
       break;
     }
   }
+
+  // Restore the toggle state by re-collapsing any toggles we opened.
+  await collapseToggles(expandedToggles);
 
   // Remove the injected style
   const styleTag = document.getElementById("notion-math-converter-hide-dialog");
@@ -180,6 +189,75 @@ function injectCSS(css) {
   style.id = "notion-math-converter-hide-dialog";
   style.appendChild(document.createTextNode(css));
   document.head.appendChild(style);
+}
+
+// Toggle Block Expansion
+
+// Expand all collapsed Notion toggle blocks so their lazy-rendered content is
+// available for equation scanning. Returns the list of toggle elements that were
+// opened so they can be re-collapsed afterwards.
+async function expandAllToggles() {
+  const expandedToggles = [];
+  const expandedSet = new Set();
+
+  // Loop to handle nested toggles: expanding a parent may reveal collapsed children.
+  while (true) {
+    const collapsed = findCollapsedToggleArrows();
+    const newCollapsed = collapsed.filter((t) => !expandedSet.has(t));
+
+    if (newCollapsed.length === 0) break;
+
+    for (const toggle of newCollapsed) {
+      toggle.click();
+      expandedToggles.push(toggle);
+      expandedSet.add(toggle);
+      await delay(TIMING.TOGGLE_EXPAND);
+    }
+  }
+
+  return expandedToggles;
+}
+
+// Find toggle arrow buttons that are currently in the collapsed state.
+// Uses two strategies in order of preference:
+//   1. aria-expanded="false" – the semantic ARIA approach
+//   2. CSS transform rotation – Notion rotates the arrow SVG 0→90 deg on open
+function findCollapsedToggleArrows() {
+  // Strategy 1: aria-expanded attribute (standard ARIA, most reliable if present)
+  const byAria = Array.from(
+    document.querySelectorAll('[aria-expanded="false"]')
+  );
+  if (byAria.length > 0) {
+    return byAria;
+  }
+
+  // Strategy 2: Notion rotates the toggle arrow div from rotate(0…) to rotate(90…).
+  // We look for elements whose inline style contains "rotate(0" and whose nearest
+  // [role="button"] ancestor is the clickable toggle header.
+  const collapsed = [];
+  const seen = new Set();
+  const pageRoot =
+    document.querySelector(".notion-page-content") || document.body;
+  const candidates = pageRoot.querySelectorAll('[style*="rotate(0"]');
+
+  for (const el of candidates) {
+    const clickable = el.closest('[role="button"]');
+    if (clickable && !seen.has(clickable)) {
+      seen.add(clickable);
+      collapsed.push(clickable);
+    }
+  }
+
+  return collapsed;
+}
+
+// Re-collapse toggles that were expanded by expandAllToggles().
+// Iterates in reverse order so nested toggles are closed before their parents.
+async function collapseToggles(expandedToggles) {
+  for (const toggle of [...expandedToggles].reverse()) {
+    toggle.click();
+    await delay(TIMING.QUICK);
+  }
 }
 
 // Helper Functions
