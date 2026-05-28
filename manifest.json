@@ -4,10 +4,16 @@
   "version": "1.0",
   "description": "Converts LaTeX-style math equations to Notion's native format.",
   "permissions": ["activeTab", "scripting"],
-  "host_permissions": ["https://www.notion.so/*"],
+  "host_permissions": [
+    "https://*.notion.so/*",
+    "https://*.notion.com/*"
+  ],
   "content_scripts": [
     {
-      "matches": ["https://www.notion.so/*"],
+      "matches": [
+        "https://*.notion.so/*",
+        "https://*.notion.com/*"
+      ],
       "js": ["content.js"]
     }
   ],
