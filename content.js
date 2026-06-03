@@ -46,47 +46,88 @@ async function convertMathEquations() {
   if (isConverting) return;
   isConverting = true;
 
-  // Ensure the page has focus before DOM manipulation (popup mode may leave focus in the extension)
   window.focus();
   await delay(50);
 
-  // Hide the math dialog box and text action menu to reduce visual distraction during conversion.
   injectCSS(
     'div[role="dialog"] { opacity: 0 !important; transform: scale(0.001) !important; } ' +
       ".notion-text-action-menu { opacity: 0 !important; transform: scale(0.001) !important; pointer-events: none !important; }"
   );
 
   try {
-    // Phase 1: Convert visible equations (existing behavior)
-    while (true) {
-      const equations = findEquations();
-
-      if (equations.length === 0) {
-        break;
-      }
-
-      const node = equations[0];
-      const match = node.nodeValue.match(EQUATION_REGEX);
-
-      if (match && match[0]) {
-        const equationText = match[0];
-        await convertSingleEquation(node, equationText);
-      } else {
-        console.warn("No equation match found in node, skipping");
-        break;
-      }
-    }
-
-    // Phase 2: Convert equations inside folded toggle blocks
-    await convertToggleEquations();
+    await scanAndConvert(document.body);
   } finally {
-    // Remove the injected style
-    const styleTag = document.getElementById("notion-math-converter-hide-dialog");
-    if (styleTag) {
-      styleTag.remove();
-    }
+    removeStyleTag();
     isConverting = false;
   }
+}
+
+// Unified DOM-order scan: processes equations and folded toggles in the order
+// they appear on the page, recursing into toggle content when encountered.
+
+function findNextItem(root) {
+  const equations = findEquations(root);
+  const firstEq = equations[0];
+
+  const toggles = findFoldedToggles(root).filter(
+    (t) => !t.hasAttribute("data-nmq-processed")
+  );
+  const firstToggle = toggles[0];
+
+  if (!firstEq && !firstToggle) return null;
+  if (!firstEq) return { type: "toggle", element: firstToggle };
+  if (!firstToggle) {
+    const match = firstEq.nodeValue.match(EQUATION_REGEX);
+    if (!match) return null;
+    return { type: "equation", node: firstEq, text: match[0] };
+  }
+
+  const pos = firstEq.compareDocumentPosition(firstToggle);
+  if (pos & Node.DOCUMENT_POSITION_PRECEDING) {
+    const match = firstEq.nodeValue.match(EQUATION_REGEX);
+    if (!match) return null;
+    return { type: "equation", node: firstEq, text: match[0] };
+  }
+  return { type: "toggle", element: firstToggle };
+}
+
+async function scanAndConvert(root) {
+  while (true) {
+    const next = findNextItem(root);
+    if (!next) break;
+
+    if (next.type === "equation") {
+      await convertSingleEquation(next.node, next.text);
+    } else {
+      await processFoldedToggleInPlace(next.element);
+    }
+  }
+}
+
+async function processFoldedToggleInPlace(toggleEl) {
+  if (!document.contains(toggleEl)) return;
+
+  try {
+    await expandToggle(toggleEl);
+  } catch (err) {
+    console.warn("Toggle expand failed, skipping:", err);
+    return;
+  }
+
+  try {
+    const contentContainer = findContentContainer(toggleEl);
+    await scanAndConvert(contentContainer);
+  } catch (err) {
+    console.error("Equation conversion inside toggle failed:", err);
+  }
+
+  collapseToggle(toggleEl);
+  toggleEl.setAttribute("data-nmq-processed", "");
+}
+
+function removeStyleTag() {
+  const styleTag = document.getElementById("notion-math-converter-hide-dialog");
+  if (styleTag) styleTag.remove();
 }
 
 // Equation Conversion
@@ -276,82 +317,7 @@ function findContentContainer(toggleEl) {
   return toggleEl;
 }
 
-// Toggle Conversion Functions
-
-async function processFoldedToggle(toggleEl) {
-  if (!document.contains(toggleEl)) return;
-  if (toggleEl.querySelector('div[role="button"]')?.getAttribute("aria-expanded") !== "false") return;
-
-  try {
-    await expandToggle(toggleEl);
-  } catch (err) {
-    console.warn("Toggle expand failed, skipping:", err);
-    return;
-  }
-
-  try {
-    // Convert equations within this toggle's content subtree
-    // Re-find the container each iteration in case React re-renders the DOM
-    while (true) {
-      const contentContainer = findContentContainer(toggleEl);
-      const equations = findEquations(contentContainer);
-      if (equations.length === 0) break;
-
-      const node = equations[0];
-      const match = node.nodeValue.match(EQUATION_REGEX);
-      if (match && match[0]) {
-        await convertSingleEquation(node, match[0]);
-      } else {
-        break;
-      }
-    }
-
-    // Process nested folded toggles recursively
-    const nestedToggles = findFoldedToggles(findContentContainer(toggleEl));
-    for (const nested of nestedToggles) {
-      await processFoldedToggle(nested);
-    }
-  } catch (err) {
-    console.error("Equation conversion inside toggle failed:", err);
-  }
-
-  collapseToggle(toggleEl);
-}
-
-async function convertToggleEquations() {
-  const allFoldedToggles = findFoldedToggles(document.body);
-  const rootFoldedToggles = allFoldedToggles.filter((toggle) => {
-    let parent = toggle.parentElement;
-    while (parent) {
-      if (parent.classList.contains("notion-toggle-block")) {
-        const parentButton = parent.querySelector('div[role="button"]');
-        if (parentButton && parentButton.getAttribute("aria-expanded") === "false") {
-          return false;
-        }
-      }
-      parent = parent.parentElement;
-    }
-    return true;
-  });
-
-  for (const toggle of rootFoldedToggles) {
-    await processFoldedToggle(toggle);
-  }
-
-  // Handle already-open toggles that may contain folded children not yet processed
-  const openToggles = document.body.querySelectorAll(
-    '.notion-toggle-block div[role="button"][aria-expanded="true"]'
-  );
-  for (const button of openToggles) {
-    const toggleEl = button.closest(".notion-toggle-block");
-    if (!toggleEl) continue;
-
-    const nestedFolded = findFoldedToggles(toggleEl);
-    for (const nested of nestedFolded) {
-      await processFoldedToggle(nested);
-    }
-  }
-}
+// Toggle Conversion — handled inline by processFoldedToggleInPlace and scanAndConvert above
 
 // Helper Functions
 
