@@ -12,6 +12,8 @@ const TIMING = {
   MATH_BLOCK: 100,
   // Wait after a conversion for Notion to update the DOM before rescanning/continuing
   POST_CONVERT: 300,
+  // Fallback timeout for MutationObserver waiting for toggle content to render
+  TOGGLE_RENDER_TIMEOUT: 5000,
 };
 
 const api = typeof browser !== "undefined" ? browser : chrome;
@@ -35,39 +37,106 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+// Re-entrance guard — prevents concurrent conversions from double-triggering
+let isConverting = false;
+
 // Main Conversion Flow
 
 async function convertMathEquations() {
-  // Hide the math dialog box and text action menu to reduce visual distraction during conversion.
+  if (isConverting) return;
+  isConverting = true;
+
+  window.focus();
+  await delay(50);
+
   injectCSS(
     'div[role="dialog"] { opacity: 0 !important; transform: scale(0.001) !important; } ' +
       ".notion-text-action-menu { opacity: 0 !important; transform: scale(0.001) !important; pointer-events: none !important; }"
   );
 
+  try {
+    await scanAndConvert(document.body);
+  } finally {
+    removeStyleTag();
+    isConverting = false;
+  }
+}
+
+// Unified DOM-order scan: processes equations and folded toggles in the order
+// they appear on the page, recursing into toggle content when encountered.
+
+function findNextItem(root) {
+  const equations = findEquations(root);
+  const toggles = findFoldedToggles(root).filter(
+    (t) => !t.hasAttribute("data-nmq-processed")
+  );
+
+  const candidates = [];
+
+  for (const eq of equations) {
+    const rect = eq.parentElement?.getBoundingClientRect();
+    if (!rect) continue;
+    const match = eq.nodeValue.match(EQUATION_REGEX);
+    if (!match) continue;
+    candidates.push({
+      type: "equation",
+      node: eq,
+      text: match[0],
+      top: rect.top + window.scrollY,
+      left: rect.left + window.scrollX,
+    });
+  }
+
+  for (const toggle of toggles) {
+    const rect = toggle.getBoundingClientRect();
+    candidates.push({
+      type: "toggle",
+      element: toggle,
+      top: rect.top + window.scrollY,
+      left: rect.left + window.scrollX,
+    });
+  }
+
+  candidates.sort((a, b) => a.top - b.top || a.left - b.left);
+  return candidates[0] || null;
+}
+
+async function scanAndConvert(root) {
   while (true) {
-    const equations = findEquations();
+    const next = findNextItem(root);
+    if (!next) break;
 
-    if (equations.length === 0) {
-      break;
-    }
-
-    const node = equations[0];
-    const match = node.nodeValue.match(EQUATION_REGEX);
-
-    if (match && match[0]) {
-      const equationText = match[0];
-      await convertSingleEquation(node, equationText);
+    if (next.type === "equation") {
+      await convertSingleEquation(next.node, next.text);
     } else {
-      console.warn("No equation match found in node, skipping");
-      break;
+      await processFoldedToggleInPlace(next.element);
     }
   }
+}
 
-  // Remove the injected style
-  const styleTag = document.getElementById("notion-math-converter-hide-dialog");
-  if (styleTag) {
-    styleTag.remove();
+async function processFoldedToggleInPlace(toggleEl) {
+  if (!document.contains(toggleEl)) return;
+
+  try {
+    await expandToggle(toggleEl);
+  } catch (err) {
+    console.warn("Toggle expand failed, skipping:", err);
+    return;
   }
+
+  try {
+    await scanAndConvert(toggleEl);
+  } catch (err) {
+    console.error("Equation conversion inside toggle failed:", err);
+  }
+
+  collapseToggle(toggleEl);
+  toggleEl.setAttribute("data-nmq-processed", "");
+}
+
+function removeStyleTag() {
+  const styleTag = document.getElementById("notion-math-converter-hide-dialog");
+  if (styleTag) styleTag.remove();
 }
 
 // Equation Conversion
@@ -182,12 +251,90 @@ function injectCSS(css) {
   document.head.appendChild(style);
 }
 
+// Toggle List Utilities
+
+function findFoldedToggles(root) {
+  const toggles = root.querySelectorAll(".notion-toggle-block");
+  return Array.from(toggles).filter((toggle) => {
+    const button = toggle.querySelector('div[role="button"]');
+    return button && button.getAttribute("aria-expanded") === "false";
+  });
+}
+
+function waitForContentRender(toggleEl, timeout) {
+  return new Promise((resolve, reject) => {
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType !== Node.ELEMENT_NODE) continue;
+          if (node.matches(".notion-selectable") || node.querySelector(".notion-selectable")) {
+            observer.disconnect();
+            clearTimeout(fallbackTimer);
+            resolve();
+            return;
+          }
+        }
+      }
+    });
+
+    observer.observe(toggleEl, { childList: true, subtree: true });
+
+    const fallbackTimer = setTimeout(() => {
+      observer.disconnect();
+      reject(new Error("Timeout waiting for toggle content to render"));
+    }, timeout);
+
+    // Check if content is already rendered (toggle was already open)
+    if (toggleEl.querySelector(".notion-selectable")) {
+      observer.disconnect();
+      clearTimeout(fallbackTimer);
+      resolve();
+    }
+  });
+}
+
+async function expandToggle(toggleEl) {
+  const button = toggleEl.querySelector('div[role="button"]');
+  if (!button) throw new Error("Toggle button not found");
+
+  if (button.getAttribute("aria-expanded") === "true") return;
+
+  button.click();
+  await waitForContentRender(toggleEl, TIMING.TOGGLE_RENDER_TIMEOUT);
+}
+
+function collapseToggle(toggleEl) {
+  const button = toggleEl.querySelector('div[role="button"]');
+  if (!button) return;
+
+  if (button.getAttribute("aria-expanded") === "false") return;
+
+  button.click();
+}
+
+function findContentContainer(toggleEl) {
+  const button = toggleEl.querySelector('div[role="button"]');
+  if (!button) return null;
+
+  const controlsId = button.getAttribute("aria-controls");
+  if (controlsId) {
+    const container = toggleEl.querySelector(`#${CSS.escape(controlsId)}`);
+    if (container) return container;
+  }
+
+  // Fallback: use the toggle element itself as the scan root
+  return toggleEl;
+}
+
+// Toggle Conversion — handled inline by processFoldedToggleInPlace and scanAndConvert above
+
 // Helper Functions
 
-function findEquations() {
+function findEquations(root) {
+  if (root === undefined) root = document.body;
   const textNodes = [];
   const walker = document.createTreeWalker(
-    document.body,
+    root,
     NodeFilter.SHOW_TEXT,
     null,
     false
@@ -196,6 +343,7 @@ function findEquations() {
   let node;
   while ((node = walker.nextNode())) {
     if (node.nodeValue && EQUATION_REGEX.test(node.nodeValue)) {
+      if (node.parentElement?.closest(".notion-code-block")) continue;
       textNodes.push(node);
     }
   }
@@ -211,6 +359,7 @@ function findEditableParent(node) {
   ) {
     parent = parent.parentElement;
   }
+  if (parent?.closest(".notion-code-block")) return null;
   return parent;
 }
 
