@@ -46,6 +46,10 @@ async function convertMathEquations() {
   if (isConverting) return;
   isConverting = true;
 
+  // Ensure the page has focus before DOM manipulation (popup mode may leave focus in the extension)
+  window.focus();
+  await delay(50);
+
   // Hide the math dialog box and text action menu to reduce visual distraction during conversion.
   injectCSS(
     'div[role="dialog"] { opacity: 0 !important; transform: scale(0.001) !important; } ' +
