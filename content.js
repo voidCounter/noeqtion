@@ -83,7 +83,9 @@ function findNextItem(root) {
   }
 
   const pos = firstEq.compareDocumentPosition(firstToggle);
-  if (pos & Node.DOCUMENT_POSITION_PRECEDING) {
+  // If the equation is contained by the toggle, it's in the visible title →
+  // process the visible equation first, then the toggle for hidden content
+  if (pos & Node.DOCUMENT_POSITION_CONTAINED_BY || pos & Node.DOCUMENT_POSITION_PRECEDING) {
     const match = firstEq.nodeValue.match(EQUATION_REGEX);
     if (!match) return null;
     return { type: "equation", node: firstEq, text: match[0] };
