@@ -67,30 +67,38 @@ async function convertMathEquations() {
 
 function findNextItem(root) {
   const equations = findEquations(root);
-  const firstEq = equations[0];
-
   const toggles = findFoldedToggles(root).filter(
     (t) => !t.hasAttribute("data-nmq-processed")
   );
-  const firstToggle = toggles[0];
 
-  if (!firstEq && !firstToggle) return null;
-  if (!firstEq) return { type: "toggle", element: firstToggle };
-  if (!firstToggle) {
-    const match = firstEq.nodeValue.match(EQUATION_REGEX);
-    if (!match) return null;
-    return { type: "equation", node: firstEq, text: match[0] };
+  const candidates = [];
+
+  for (const eq of equations) {
+    const rect = eq.parentElement?.getBoundingClientRect();
+    if (!rect) continue;
+    const match = eq.nodeValue.match(EQUATION_REGEX);
+    if (!match) continue;
+    candidates.push({
+      type: "equation",
+      node: eq,
+      text: match[0],
+      top: rect.top + window.scrollY,
+      left: rect.left + window.scrollX,
+    });
   }
 
-  const pos = firstEq.compareDocumentPosition(firstToggle);
-  // If the equation is contained by the toggle, it's in the visible title →
-  // process the visible equation first, then the toggle for hidden content
-  if (pos & Node.DOCUMENT_POSITION_CONTAINED_BY || pos & Node.DOCUMENT_POSITION_PRECEDING) {
-    const match = firstEq.nodeValue.match(EQUATION_REGEX);
-    if (!match) return null;
-    return { type: "equation", node: firstEq, text: match[0] };
+  for (const toggle of toggles) {
+    const rect = toggle.getBoundingClientRect();
+    candidates.push({
+      type: "toggle",
+      element: toggle,
+      top: rect.top + window.scrollY,
+      left: rect.left + window.scrollX,
+    });
   }
-  return { type: "toggle", element: firstToggle };
+
+  candidates.sort((a, b) => a.top - b.top || a.left - b.left);
+  return candidates[0] || null;
 }
 
 async function scanAndConvert(root) {
