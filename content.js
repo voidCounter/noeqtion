@@ -368,6 +368,7 @@ function findEquations(root) {
   let node;
   while ((node = walker.nextNode())) {
     if (node.nodeValue && EQUATION_REGEX.test(node.nodeValue)) {
+      if (node.parentElement?.closest(".notion-code-block")) continue;
       textNodes.push(node);
     }
   }
@@ -383,6 +384,7 @@ function findEditableParent(node) {
   ) {
     parent = parent.parentElement;
   }
+  if (parent?.closest(".notion-code-block")) return null;
   return parent;
 }
 
