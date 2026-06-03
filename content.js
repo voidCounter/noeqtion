@@ -125,8 +125,7 @@ async function processFoldedToggleInPlace(toggleEl) {
   }
 
   try {
-    const contentContainer = findContentContainer(toggleEl);
-    await scanAndConvert(contentContainer);
+    await scanAndConvert(toggleEl);
   } catch (err) {
     console.error("Equation conversion inside toggle failed:", err);
   }
