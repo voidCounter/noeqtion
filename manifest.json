@@ -1,19 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Notion Math Converter",
-  "version": "1.0",
+  "version": "0.0.2",
   "description": "Converts LaTeX-style math equations to Notion's native format.",
   "permissions": ["activeTab", "scripting"],
-  "host_permissions": [
-    "https://*.notion.so/*",
-    "https://*.notion.com/*"
-  ],
+  "host_permissions": ["https://*.notion.so/*", "https://*.notion.com/*"],
   "content_scripts": [
     {
-      "matches": [
-        "https://*.notion.so/*",
-        "https://*.notion.com/*"
-      ],
+      "matches": ["https://*.notion.so/*", "https://*.notion.com/*"],
       "js": ["content.js"]
     }
   ],
