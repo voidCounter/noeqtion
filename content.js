@@ -12,6 +12,8 @@ const TIMING = {
   MATH_BLOCK: 100,
   // Wait after a conversion for Notion to update the DOM before rescanning/continuing
   POST_CONVERT: 300,
+  // Fallback timeout for MutationObserver waiting for toggle content to render
+  TOGGLE_RENDER_TIMEOUT: 5000,
 };
 
 const api = typeof browser !== "undefined" ? browser : chrome;
@@ -35,38 +37,51 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+// Re-entrance guard — prevents concurrent conversions from double-triggering
+let isConverting = false;
+
 // Main Conversion Flow
 
 async function convertMathEquations() {
+  if (isConverting) return;
+  isConverting = true;
+
   // Hide the math dialog box and text action menu to reduce visual distraction during conversion.
   injectCSS(
     'div[role="dialog"] { opacity: 0 !important; transform: scale(0.001) !important; } ' +
       ".notion-text-action-menu { opacity: 0 !important; transform: scale(0.001) !important; pointer-events: none !important; }"
   );
 
-  while (true) {
-    const equations = findEquations();
+  try {
+    // Phase 1: Convert visible equations (existing behavior)
+    while (true) {
+      const equations = findEquations();
 
-    if (equations.length === 0) {
-      break;
+      if (equations.length === 0) {
+        break;
+      }
+
+      const node = equations[0];
+      const match = node.nodeValue.match(EQUATION_REGEX);
+
+      if (match && match[0]) {
+        const equationText = match[0];
+        await convertSingleEquation(node, equationText);
+      } else {
+        console.warn("No equation match found in node, skipping");
+        break;
+      }
     }
 
-    const node = equations[0];
-    const match = node.nodeValue.match(EQUATION_REGEX);
-
-    if (match && match[0]) {
-      const equationText = match[0];
-      await convertSingleEquation(node, equationText);
-    } else {
-      console.warn("No equation match found in node, skipping");
-      break;
+    // Phase 2: Convert equations inside folded toggle blocks
+    await convertToggleEquations();
+  } finally {
+    // Remove the injected style
+    const styleTag = document.getElementById("notion-math-converter-hide-dialog");
+    if (styleTag) {
+      styleTag.remove();
     }
-  }
-
-  // Remove the injected style
-  const styleTag = document.getElementById("notion-math-converter-hide-dialog");
-  if (styleTag) {
-    styleTag.remove();
+    isConverting = false;
   }
 }
 
@@ -87,6 +102,7 @@ async function convertSingleEquation(node, equationText) {
     }
 
     editableParent.click();
+    editableParent.focus();
     await delay(TIMING.FOCUS);
 
     selectText(node, startIndex, equationText.length);
@@ -109,6 +125,9 @@ async function convertSingleEquation(node, equationText) {
     } else {
       await convertInlineEquation(latexContent);
     }
+
+    // Brief settling delay before the next rescan, giving React time to reconcile
+    await delay(TIMING.QUICK);
   } catch (err) {
     console.error("Equation conversion failed:", err);
   }
@@ -182,12 +201,165 @@ function injectCSS(css) {
   document.head.appendChild(style);
 }
 
+// Toggle List Utilities
+
+function findFoldedToggles(root) {
+  const toggles = root.querySelectorAll(".notion-toggle-block");
+  return Array.from(toggles).filter((toggle) => {
+    const button = toggle.querySelector('div[role="button"]');
+    return button && button.getAttribute("aria-expanded") === "false";
+  });
+}
+
+function waitForContentRender(toggleEl, timeout) {
+  return new Promise((resolve, reject) => {
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType !== Node.ELEMENT_NODE) continue;
+          if (node.matches(".notion-selectable") || node.querySelector(".notion-selectable")) {
+            observer.disconnect();
+            clearTimeout(fallbackTimer);
+            resolve();
+            return;
+          }
+        }
+      }
+    });
+
+    observer.observe(toggleEl, { childList: true, subtree: true });
+
+    const fallbackTimer = setTimeout(() => {
+      observer.disconnect();
+      reject(new Error("Timeout waiting for toggle content to render"));
+    }, timeout);
+
+    // Check if content is already rendered (toggle was already open)
+    if (toggleEl.querySelector(".notion-selectable")) {
+      observer.disconnect();
+      clearTimeout(fallbackTimer);
+      resolve();
+    }
+  });
+}
+
+async function expandToggle(toggleEl) {
+  const button = toggleEl.querySelector('div[role="button"]');
+  if (!button) throw new Error("Toggle button not found");
+
+  if (button.getAttribute("aria-expanded") === "true") return;
+
+  button.click();
+  await waitForContentRender(toggleEl, TIMING.TOGGLE_RENDER_TIMEOUT);
+}
+
+function collapseToggle(toggleEl) {
+  const button = toggleEl.querySelector('div[role="button"]');
+  if (!button) return;
+
+  if (button.getAttribute("aria-expanded") === "false") return;
+
+  button.click();
+}
+
+function findContentContainer(toggleEl) {
+  const button = toggleEl.querySelector('div[role="button"]');
+  if (!button) return null;
+
+  const controlsId = button.getAttribute("aria-controls");
+  if (controlsId) {
+    const container = toggleEl.querySelector(`#${CSS.escape(controlsId)}`);
+    if (container) return container;
+  }
+
+  // Fallback: use the toggle element itself as the scan root
+  return toggleEl;
+}
+
+// Toggle Conversion Functions
+
+async function processFoldedToggle(toggleEl) {
+  if (!document.contains(toggleEl)) return;
+  if (toggleEl.querySelector('div[role="button"]')?.getAttribute("aria-expanded") !== "false") return;
+
+  try {
+    await expandToggle(toggleEl);
+  } catch (err) {
+    console.warn("Toggle expand failed, skipping:", err);
+    return;
+  }
+
+  try {
+    // Convert equations within this toggle's content subtree
+    // Re-find the container each iteration in case React re-renders the DOM
+    while (true) {
+      const contentContainer = findContentContainer(toggleEl);
+      const equations = findEquations(contentContainer);
+      if (equations.length === 0) break;
+
+      const node = equations[0];
+      const match = node.nodeValue.match(EQUATION_REGEX);
+      if (match && match[0]) {
+        await convertSingleEquation(node, match[0]);
+      } else {
+        break;
+      }
+    }
+
+    // Process nested folded toggles recursively
+    const nestedToggles = findFoldedToggles(findContentContainer(toggleEl));
+    for (const nested of nestedToggles) {
+      await processFoldedToggle(nested);
+    }
+  } catch (err) {
+    console.error("Equation conversion inside toggle failed:", err);
+  }
+
+  collapseToggle(toggleEl);
+}
+
+async function convertToggleEquations() {
+  const allFoldedToggles = findFoldedToggles(document.body);
+  const rootFoldedToggles = allFoldedToggles.filter((toggle) => {
+    let parent = toggle.parentElement;
+    while (parent) {
+      if (parent.classList.contains("notion-toggle-block")) {
+        const parentButton = parent.querySelector('div[role="button"]');
+        if (parentButton && parentButton.getAttribute("aria-expanded") === "false") {
+          return false;
+        }
+      }
+      parent = parent.parentElement;
+    }
+    return true;
+  });
+
+  for (const toggle of rootFoldedToggles) {
+    await processFoldedToggle(toggle);
+  }
+
+  // Handle already-open toggles that may contain folded children not yet processed
+  const openToggles = document.body.querySelectorAll(
+    '.notion-toggle-block div[role="button"][aria-expanded="true"]'
+  );
+  for (const button of openToggles) {
+    const toggleEl = button.closest(".notion-toggle-block");
+    if (!toggleEl) continue;
+
+    const nestedFolded = findFoldedToggles(toggleEl);
+    for (const nested of nestedFolded) {
+      await processFoldedToggle(nested);
+    }
+  }
+}
+
 // Helper Functions
 
-function findEquations() {
+function findEquations(root) {
+  if (root === undefined) root = document.body;
   const textNodes = [];
   const walker = document.createTreeWalker(
-    document.body,
+    root,
     NodeFilter.SHOW_TEXT,
     null,
     false
