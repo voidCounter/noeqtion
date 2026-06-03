@@ -102,7 +102,6 @@ async function convertSingleEquation(node, equationText) {
     }
 
     editableParent.click();
-    editableParent.focus();
     await delay(TIMING.FOCUS);
 
     selectText(node, startIndex, equationText.length);
@@ -125,9 +124,6 @@ async function convertSingleEquation(node, equationText) {
     } else {
       await convertInlineEquation(latexContent);
     }
-
-    // Brief settling delay before the next rescan, giving React time to reconcile
-    await delay(TIMING.QUICK);
   } catch (err) {
     console.error("Equation conversion failed:", err);
   }
