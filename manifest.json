@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Notion Math Converter",
-  "version": "0.0.2",
+  "version": "1.1.0",
   "description": "Converts LaTeX-style math equations to Notion's native format.",
   "permissions": ["activeTab", "scripting"],
   "host_permissions": ["https://*.notion.so/*", "https://*.notion.com/*"],
@@ -13,5 +13,14 @@
   ],
   "action": {
     "default_popup": "popup.html"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "noeqtion@rohit",
+      "data_collection_permissions": {
+        "required": ["none"],
+        "optional": []
+      }
+    }
   }
 }
