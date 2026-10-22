@@ -14,8 +14,10 @@ _See the extension in action converting LaTeX equations to Notion's native math 
 
 ## Features
 
-- **Automatic Conversion**: Detects both inline (`$...$`) and block (`$$...$$`) equations.
+- **Automatic Conversion**: Detects inline math (<code>$...$</code>, <code>$`...`$</code>, and `\\(...\\)`) and block (`$$...$$` and `\\[...\\]`) equations. Opening and closing delimiters must be in the same Notion text block.
 - **Keyboard Shortcut**: Convert all equations on the page with `Ctrl+Alt+M` (or use the extension popup).
+- **Safe Cancellation**: Press `Esc` to stop a conversion in progress.
+- **Progress Feedback**: The popup button changes color while converting and resets after completion.
 
 That's it.
 
@@ -50,7 +52,7 @@ That's it.
 
 The extension uses Notion's existing shortcuts and features to create math blocks. For display equations (`$$...$$`), it uses the `/math` command. For inline equations (`$...$`), it converts them to Notion's inline format by wrapping them as `$$...$$`.
 
-To reduce visual distraction during conversion, the extension temporarily hides math dialogs using injected CSS. It processes equations sequentially, rescanning the DOM after each conversion to handle Notion's dynamic content updates.
+To reduce visual distraction during conversion, the extension temporarily hides math dialogs using injected CSS. It processes all discovered equations sequentially, reusing a candidate batch and rescanning when Notion replaces dynamic content.
 
 The extension doesn't inject custom UI or modify Notion's core behavior. It automates what you'd do manually, just much faster.
 

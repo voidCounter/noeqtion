@@ -15,4 +15,28 @@ button {
   background-color: #007bff;
   color: white;
   cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+button.converting {
+  background-color: #d97706;
+  cursor: wait;
+}
+
+button.partial {
+  background-color: #d97706;
+}
+
+button.complete {
+  background-color: #16a34a;
+}
+
+button.stopped,
+button.no-changes,
+button.error {
+  background-color: #dc2626;
+}
+
+button.no-matches {
+  background-color: #6b7280;
 }
